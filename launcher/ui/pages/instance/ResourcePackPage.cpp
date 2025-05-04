@@ -37,8 +37,6 @@
 
 #include "ResourcePackPage.h"
 
-#include "ResourceDownloadTask.h"
-
 #include "ui/dialogs/CustomMessageBox.h"
 #include "ui/dialogs/ProgressDialog.h"
 #include "ui/dialogs/ResourceDownloadDialog.h"
@@ -86,10 +84,17 @@ void ResourcePackPage::downloadResourcePacks()
     if (m_instance->typeName() != "Minecraft")
         return;  // this is a null instance or a legacy instance
 
-    ResourceDownload::ResourcePackDownloadDialog mdownload(this, m_model, m_instance);
-    if (mdownload.exec()) {
-        auto tasks =
-            new ConcurrentTask(this, "Download Resource Pack", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
+    m_downloadDialog = new ResourceDownload::ResourcePackDownloadDialog(this, m_model, m_instance);
+    connect(this, &QObject::destroyed, m_downloadDialog, &QDialog::close);
+    connect(m_downloadDialog, &QDialog::finished, this, &ResourcePackPage::downloadDialogFinished);
+
+    m_downloadDialog->open();
+}
+
+void ResourcePackPage::downloadDialogFinished(int result)
+{
+    if (result) {
+        auto tasks = new ConcurrentTask("Download Resource Pack", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
         connect(tasks, &Task::failed, [this, tasks](QString reason) {
             CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
             tasks->deleteLater();
@@ -106,8 +111,12 @@ void ResourcePackPage::downloadResourcePacks()
             tasks->deleteLater();
         });
 
-        for (auto& task : mdownload.getTasks()) {
-            tasks->addTask(task);
+        if (m_downloadDialog) {
+            for (auto& task : m_downloadDialog->getTasks()) {
+                tasks->addTask(task);
+            }
+        } else {
+            qWarning() << "ResourceDownloadDialog vanished before we could collect tasks!";
         }
 
         ProgressDialog loadDialog(this);
@@ -116,6 +125,8 @@ void ResourcePackPage::downloadResourcePacks()
 
         m_model->update();
     }
+    if (m_downloadDialog)
+        m_downloadDialog->deleteLater();
 }
 
 void ResourcePackPage::updateResourcePacks()
@@ -168,8 +179,7 @@ void ResourcePackPage::updateResourcePacks()
     }
 
     if (update_dialog.exec()) {
-        auto tasks =
-            new ConcurrentTask(this, "Download Resource Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
+        auto tasks = new ConcurrentTask("Download Resource Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
         connect(tasks, &Task::failed, [this, tasks](QString reason) {
             CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
             tasks->deleteLater();
@@ -234,40 +244,15 @@ void ResourcePackPage::changeResourcePackVersion()
     if (rows.count() != 1)
         return;
 
-    Resource &resource = m_model->at(m_filterModel->mapToSource(rows[0]).row());
+    Resource& resource = m_model->at(m_filterModel->mapToSource(rows[0]).row());
 
     if (resource.metadata() == nullptr)
         return;
 
-    ResourceDownload::ResourcePackDownloadDialog mdownload(this, m_model, m_instance);
-    mdownload.setResourceMetadata(resource.metadata());
-    if (mdownload.exec()) {
-        auto tasks =
-            new ConcurrentTask(this, "Download Resource Packs", APPLICATION->settings()->get("NumberOfConcurrentDownloads").toInt());
-        connect(tasks, &Task::failed, [this, tasks](QString reason) {
-            CustomMessageBox::selectable(this, tr("Error"), reason, QMessageBox::Critical)->show();
-            tasks->deleteLater();
-        });
-        connect(tasks, &Task::aborted, [this, tasks]() {
-            CustomMessageBox::selectable(this, tr("Aborted"), tr("Download stopped by user."), QMessageBox::Information)->show();
-            tasks->deleteLater();
-        });
-        connect(tasks, &Task::succeeded, [this, tasks]() {
-            QStringList warnings = tasks->warnings();
-            if (warnings.count())
-                CustomMessageBox::selectable(this, tr("Warnings"), warnings.join('\n'), QMessageBox::Warning)->show();
+    m_downloadDialog = new ResourceDownload::ResourcePackDownloadDialog(this, m_model, m_instance);
+    connect(this, &QObject::destroyed, m_downloadDialog, &QDialog::close);
+    connect(m_downloadDialog, &QDialog::finished, this, &ResourcePackPage::downloadDialogFinished);
 
-            tasks->deleteLater();
-        });
-
-        for (auto& task : mdownload.getTasks()) {
-            tasks->addTask(task);
-        }
-
-        ProgressDialog loadDialog(this);
-        loadDialog.setSkipButton(true, tr("Abort"));
-        loadDialog.execWithTask(tasks);
-
-        m_model->update();
-    }
+    m_downloadDialog->setResourceMetadata(resource.metadata());
+    m_downloadDialog->open();
 }

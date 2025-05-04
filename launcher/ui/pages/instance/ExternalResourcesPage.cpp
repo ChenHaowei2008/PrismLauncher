@@ -112,6 +112,7 @@ ExternalResourcesPage::ExternalResourcesPage(BaseInstance* instance, std::shared
 
     m_model->loadColumns(ui->treeView);
     connect(ui->treeView->header(), &QHeaderView::sectionResized, this, [this] { m_model->saveColumns(ui->treeView); });
+    connect(ui->filterEdit, &QLineEdit::textChanged, this, &ExternalResourcesPage::filterTextChanged);
 }
 
 ExternalResourcesPage::~ExternalResourcesPage()
@@ -145,10 +146,7 @@ void ExternalResourcesPage::openedImpl()
     m_model->startWatching();
 
     auto const setting_name = QString("WideBarVisibility_%1").arg(id());
-    if (!APPLICATION->settings()->contains(setting_name))
-        m_wide_bar_setting = APPLICATION->settings()->registerSetting(setting_name);
-    else
-        m_wide_bar_setting = APPLICATION->settings()->getSetting(setting_name);
+    m_wide_bar_setting = APPLICATION->settings()->getOrRegisterSetting(setting_name);
 
     ui->actionsToolbar->setVisibilityState(m_wide_bar_setting->get().toByteArray());
 }
